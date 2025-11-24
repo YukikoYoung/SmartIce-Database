@@ -55,46 +55,55 @@
 
 ---
 
-## 文件结构索引
+## 项目结构
 
-### SQL脚本
+```
+SmartIce-Database/
+├── CLAUDE.md                 # 项目概述
+├── README.md                 # GitHub说明
+├── .gitignore                # Git排除规则
+├── db/                       # 数据库文件
+│   ├── schema/               # 表结构
+│   ├── functions/            # 函数/触发器/存储过程
+│   ├── views/                # 视图
+│   ├── data/                 # 数据导入SQL
+│   └── scripts/              # Python ETL脚本
+└── docs/                     # 文档
+```
 
-**表结构**:
+### db/schema/ - 表结构
 - `schema_core_mvp.sql` - 核心MVP表结构 (24张)
 - `schema_extension_order_system.sql` - 订单系统扩展 (13张)
 - `schema_platform_data.sql` - 线上平台数据表 (4张)
+- `schema.sql` - 完整表结构
 
-**函数与逻辑**:
+### db/functions/ - 函数与逻辑
+- `functions.sql` - 通用函数
 - `functions_cost_encryption.sql` - 成本加密/解密函数
 - `functions_bom_explosion.sql` - BOM递归分解函数
 - `triggers_automatic_calculation.sql` - 自动计算触发器
 - `procedures_data_validation.sql` - 数据验证存储过程
 
-**视图**:
+### db/views/ - 视图
 - `views_financial_analysis.sql` - 双成本率分析视图
 - `views_operations_kpi.sql` - 运营KPI视图
 
-**数据导入**:
+### db/data/ - 数据导入
+- `data_init_mvp.sql` - 初始化数据
 - `data_organization_stores.sql` - 组织架构+门店
+- `data_raw_materials.sql` - 原材料数据
+- `data_products_recipes.sql` - 产品配方数据
 - `data_cost_card_import.sql` - 成本卡导入
 - `data_sop_import.sql` - SOP导入
-- `data_init_mvp.sql` - 初始化数据
 
-### Python脚本
-
+### db/scripts/ - Python脚本
 - `generate_cost_card_sql.py` - 从Excel生成成本卡SQL
 - `generate_product_recipe_sql.py` - 从Excel生成配方SQL
 - `generate_sop_sql.py` - 从Excel生成SOP SQL
 - `etl_excel_to_order_system.py` - Excel数据导入订单系统
+- `etl_excel_to_staging.py` - Excel数据导入暂存区
 - `import_platform_data.py` - 线上平台数据导入
 - `utils/normalize_name.py` - 产品名称规范化工具
-
-### 配置文件
-
-- `.gitignore` - Git排除规则（已排除Excel、图片等大文件）
-- `计量标准.md` - 计量单位标准体系
-- `数据录入规则与迁移指南.md` - 数据录入规则
-- `数据录入规则_订单系统扩展.md` - 订单系统数据录入规则
 
 ---
 
@@ -122,6 +131,7 @@
 
 | 版本 | 日期 | 说明 |
 |-----|------|-----|
+| v2.4.0 | 2025-11-25 | 仓库结构重组，db/分层目录，清理重复文件 |
 | v2.3.0 | 2025-11-25 | GitHub精简版推送，移除大文件，添加.gitignore |
 | v2.2.0 | 2025-11-24 | 线上平台数据表 + 宁桂杏门店 + 美团点评数据导入 |
 | v2.1.0 | 2025-11-23 | 销售数据导入 + 产品别名表 + 品牌关联 |
@@ -141,8 +151,8 @@ brew install postgresql@15 && brew services start postgresql@15
 createdb yebailing_db
 
 # 3. 按顺序执行SQL
-psql yebailing_db -f schema_core_mvp.sql
-psql yebailing_db -f data_init_mvp.sql
+psql yebailing_db -f db/schema/schema_core_mvp.sql
+psql yebailing_db -f db/data/data_init_mvp.sql
 # ... (详细步骤见 docs/DEPLOYMENT.md)
 ```
 
