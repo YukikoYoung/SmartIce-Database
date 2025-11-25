@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SmartIce 数据库设计说明</title>
+    <!-- v3.3 - Fixed: Lines connect from table card edges (outside), pointing inward to target rows -->
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: #0d1117;
+            color: #c9d1d9;
+            line-height: 1.6;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            padding: 20px 40px;
+            border-bottom: 3px solid #e94560;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+
+        .header-left h1 {
+            color: #fff;
+            font-size: 24px;
+            margin-bottom: 5px;
+        }
+
+        .header-left p {
+            color: #8b949e;
+            font-size: 14px;
+        }
+
+        .view-toggle {
+            display: flex;
+            background: #21262d;
+            border-radius: 8px;
+            padding: 4px;
+            gap: 4px;
+        }
+
+        .view-btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            transition: all 0.2s;
+            background: transparent;
+            color: #8b949e;
+        }
+
+        .view-btn:hover { color: #c9d1d9; }
+        .view-btn.active { background: #e94560; color: #fff; }
+
+        .main-container {
+            display: flex;
+            height: calc(100vh - 90px);
+        }
+
+        .sidebar {
+            width: 300px;
+            background: #161b22;
+            border-right: 1px solid #30363d;
+            overflow-y: auto;
+            padding: 20px;
+            flex-shrink: 0;
+        }
+
+        .sidebar h2 {
+            color: #e94560;
+            font-size: 16px;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #30363d;
+        }
+
+        .design-note {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 12px;
+        }
+
+        .design-note h3 {
+            color: #58a6ff;
+            font-size: 13px;
+            margin-bottom: 8px;
+        }
+
+        .design-note p { font-size: 12px; color: #8b949e; margin-bottom: 6px; }
+        .design-note .highlight { color: #7ee787; font-weight: 500; }
+        .design-note ul { margin-left: 16px; font-size: 11px; color: #8b949e; }
+        .design-note li { margin-bottom: 4px; }
+        .badge { display: inline-block; padding: 2px 6px; border-radius: 10px; font-size: 10px; font-weight: 500; }
+        .badge.success { background: #238636; color: #fff; }
+        .badge.info { background: #1f6feb; color: #fff; }
+
+        /* Canvas area with global SVG overlay */
+        .canvas-area {
+            flex: 1;
+            overflow: auto;
+            padding: 30px;
+            position: relative;
+        }
+
+        /* Global SVG for cross-domain lines */
+        #global-svg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            pointer-events: none;
+            z-index: 100;
+            display: none;
+        }
+
+        .canvas-view-active #global-svg {
+            display: block;
+        }
+
+        .domain-section {
+            margin-bottom: 30px;
+        }
+
+        .domain-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 15px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #30363d;
+        }
+
+        .domain-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+        }
+
+        .domain-icon.org { background: #1f6feb; }
+        .domain-icon.product { background: #238636; }
+        .domain-icon.inventory { background: #a371f7; }
+        .domain-icon.sales { background: #f0883e; }
+        .domain-icon.platform { background: #db61a2; }
+
+        .domain-title { color: #fff; font-size: 16px; }
+        .domain-desc { color: #8b949e; font-size: 12px; }
+
+        .tables-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        /* Canvas View - single unified canvas */
+        .tables-canvas {
+            display: none;
+            flex-wrap: wrap;
+            gap: 20px;
+            padding: 15px;
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            min-height: 200px;
+            position: relative;
+        }
+
+        .tables-canvas .table-card {
+            cursor: move;
+            user-select: none;
+            position: relative;
+        }
+
+        .tables-canvas .table-card.dragging {
+            opacity: 0.9;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+            z-index: 200;
+        }
+
+        .canvas-view-active .tables-grid { display: none; }
+        .canvas-view-active .tables-canvas { display: flex; }
+        .canvas-view-active .relationship-note { display: none; }
+
+        .table-card {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            width: 220px;
+            overflow: hidden;
+        }
+
+        .table-card:hover {
+            border-color: #58a6ff;
+            box-shadow: 0 0 15px rgba(88, 166, 255, 0.1);
+        }
+
+        .table-header {
+            padding: 8px 10px;
+            font-weight: 600;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            color: #fff;
+        }
+
+        .table-header.org { background: #1f6feb; }
+        .table-header.product { background: #238636; }
+        .table-header.inventory { background: #a371f7; }
+        .table-header.sales { background: #f0883e; }
+        .table-header.platform { background: #db61a2; }
+
+        .table-name { display: flex; align-items: center; gap: 5px; }
+        .row-count { font-size: 9px; opacity: 0.8; }
+
+        .table-columns { max-height: 150px; overflow-y: auto; }
+
+        .column-row {
+            padding: 3px 10px;
+            font-size: 10px;
+            border-bottom: 1px solid #21262d;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: relative;
+        }
+
+        .column-row:last-child { border-bottom: none; }
+        .column-row:hover { background: #21262d; }
+
+        /* Highlight for connected columns */
+        .column-row.highlight-pk { background: rgba(240, 193, 75, 0.2); }
+        .column-row.highlight-fk { background: rgba(88, 166, 255, 0.2); }
+
+        .col-name {
+            font-family: 'SF Mono', 'Consolas', monospace;
+            color: #c9d1d9;
+            font-size: 10px;
+        }
+
+        .col-name.pk { color: #f0c14b; }
+        .col-name.pk::before { content: '🔑 '; font-size: 8px; }
+        .col-name.fk { color: #58a6ff; }
+        .col-name.fk::before { content: '→ '; }
+
+        .col-type { color: #6e7681; font-size: 9px; font-family: monospace; }
+
+        .table-footer {
+            padding: 5px 10px;
+            background: #0d1117;
+            font-size: 9px;
+            color: #6e7681;
+            border-top: 1px solid #21262d;
+        }
+
+        .relationship-note {
+            background: #1c2128;
+            border-left: 3px solid #58a6ff;
+            padding: 8px 12px;
+            margin-top: 12px;
+            border-radius: 0 6px 6px 0;
+            font-size: 11px;
+        }
+
+        .relationship-note strong { color: #58a6ff; }
+
+        /* SVG relationship lines */
+        .relationship-line {
+            stroke: #58a6ff;
+            stroke-width: 2;
+            fill: none;
+            opacity: 0.7;
+        }
+
+        .relationship-line.cross-domain {
+            stroke: #f0883e;
+            stroke-dasharray: 5, 3;
+        }
+
+        .line-marker { fill: #58a6ff; }
+        .line-marker.cross-domain { fill: #f0883e; }
+
+        .canvas-help {
+            display: none;
+            background: #21262d;
+            border-radius: 6px;
+            padding: 6px 10px;
+            margin-bottom: 12px;
+            font-size: 11px;
+            color: #8b949e;
+        }
+
+        .canvas-view-active .canvas-help { display: block; }
+
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #0d1117; }
+        ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #484f58; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-left">
+            <h1>🍽️ 野百灵餐饮集团 - 数据库架构设计说明</h1>
+            <p>SmartIce Database Schema | PostgreSQL 15 | 第三范式 (3NF) 设计</p>
+        </div>
+        <div class="view-toggle">
+            <button class="view-btn active" data-view="panel">📋 Panel View</button>
+            <button class="view-btn" data-view="canvas">🎨 Canvas View</button>
+        </div>
+    </div>
+
+    <div class="main-container">
+        <div class="sidebar">
+            <h2>📐 设计原则说明</h2>
+            <div class="design-note">
+                <h3>✅ 第三范式 (3NF) 合规</h3>
+                <p>本数据库<span class="highlight">完全遵循第三范式</span>设计</p>
+                <ul>
+                    <li><strong>1NF:</strong> 原子值，无重复组</li>
+                    <li><strong>2NF:</strong> 完全依赖主键</li>
+                    <li><strong>3NF:</strong> 无传递依赖</li>
+                </ul>
+                <p><span class="badge success">已实现</span></p>
+            </div>
+            <div class="design-note">
+                <h3>🔐 数据安全设计</h3>
+                <p>敏感数据采用<span class="highlight">pgcrypto加密</span></p>
+                <ul>
+                    <li>成本数据 → BYTEA 加密</li>
+                    <li>视图分层 → 完整/脱敏/无成本</li>
+                </ul>
+            </div>
+            <div class="design-note">
+                <h3>🔗 外键关系设计</h3>
+                <p>采用<span class="highlight">严格的引用完整性</span></p>
+                <ul>
+                    <li>brand → store → employee</li>
+                    <li>product → recipe → recipe_item</li>
+                    <li>warehouse → inventory</li>
+                </ul>
+            </div>
+            <div class="design-note">
+                <h3>📊 BOM 递归分解</h3>
+                <p>支持<span class="highlight">半成品多层分解</span></p>
+                <p><span class="badge info">explode_bom()</span></p>
+            </div>
+            <div class="design-note">
+                <h3>📈 数据统计</h3>
+                <p><strong>表数量:</strong> 18张核心表</p>
+                <p><strong>产品数:</strong> 551个</p>
+                <p><strong>配方数:</strong> 87个</p>
+            </div>
+        </div>
+
+        <div class="canvas-area" id="canvas-area">
+            <!-- Global SVG for relationship lines -->
+            <svg id="global-svg">
+                <defs>
+                    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                        <polygon points="0 0, 10 3.5, 0 7" class="line-marker"/>
+                    </marker>
+                    <marker id="arrowhead-cross" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                        <polygon points="0 0, 10 3.5, 0 7" class="line-marker cross-domain"/>
+                    </marker>
+                </defs>
+            </svg>
+
+            <div class="canvas-help">💡 Canvas View: 拖拽表格调整位置 | 蓝线=域内关系 | 橙色虚线=跨域关系 | 箭头指向具体的PK/FK列</div>
+
+            <!-- Domain 1: Organization -->
+            <div class="domain-section" data-domain="org">
+                <div class="domain-header">
+                    <div class="domain-icon org">🏢</div>
+                    <div>
+                        <div class="domain-title">组织架构域 (Organization Domain)</div>
+                        <div class="domain-desc">brand → store → employee</div>
+                    </div>
+                </div>
+                <div class="tables-grid">
+                    <div class="table-card" data-table="brand">
+                        <div class="table-header org"><span class="table-name">📋 brand</span><span class="row-count">3条</span></div>
+                        <div class="table-columns">
+                            <div class="column-row" data-col="brand_id" data-pk="true"><span class="col-name pk">brand_id</span><span class="col-type">SERIAL</span></div>
+                            <div class="column-row"><span class="col-name">brand_code</span><span class="col-type">VARCHAR(20)</span></div>
+                            <div class="column-row"><span class="col-name">brand_name</span><span class="col-type">VARCHAR(100)</span></div>
+                            <div class="column-row"><span class="col-name">is_active</span><span class="col-type">BOOLEAN</span></div>
+                        </div>
+                        <div class="table-footer">品牌表</div>
+                    </div>
+                    <div class="table-card" data-table="store">
+                        <div class="table-header org"><span class="table-name">📋 store</span><span class="row-count">6条</span></div>
+                        <div class="table-columns">
+                            <div class="column-row" data-col="store_id" data-pk="true"><span class="col-name pk">store_id</span><span class="col-type">SERIAL</span></div>
+                            <div class="column-row"><span class="col-name">store_code</span><span class="col-type">VARCHAR(20)</span></div>
+                            <div class="column-row"><span class="col-name">store_name</span><span class="col-type">VARCHAR(100)</span></div>
+                            <div class="column-row" data-col="brand_id" data-fk="brand.brand_id"><span class="col-name fk">brand_id → brand</span><span class="col-type">INT</span></div>
+                            <div class="column-row"><span class="col-name">store_type</span><span class="col-type">VARCHAR(50)</span></div>
+                        </div>
+                        <div class="table-footer">门店表</div>
+                    </div>
+                    <div class="table-card" data-table="employee">
+                        <div class="table-header org"><span class="table-name">📋 employee</span><span class="row-count">~50条</span></div>
+                        <div class="table-columns">
+                            <div class="column-row" data-col="employee_id" data-pk="true"><span class="col-name pk">employee_id</span><span class="col-type">SERIAL</span></div>
+                            <div class="column-row"><span class="col-name">employee_name</span><span class="col-type">VARCHAR(50)</span></div>
+                            <div class="column-row" data-col="store_id" data-fk="store.store_id"><span class="col-name fk">store_id → store</span><span class="col-type">INT</span></div>
+                            <div class="column-row" data-col="brand_id" data-fk="brand.brand_id"><span class="col-name fk">brand_id → brand</span><span class="col-type">INT</span></div>
+                            <div class="column-row"><span class="col-name">position</span><span class="col-type">VARCHAR(50)</span></div>
+                        </div>
+                        <div class="table-footer">员工表</div>
+                    </div>
+                </div>
+                <div class="tables-canvas" data-canvas="org"></div>
+                <div class="relationship-note"><strong>关系:</strong> brand (1) → (N) store (1) → (N) employee</div>
+            </div>
+
+            <!-- Domain 2: Product & Recipe -->
+            <div class="domain-section" data-domain="product">
+                <div class="domain-header">
+                    <div class="domain-icon product">🍜</div>
+                    <div>
+                        <div class="domain-title">产品配方域 (Product & Recipe Domain)</div>
+                        <div class="domain-desc">product → recipe → recipe_item</div>
+                    </div>
+                </div>
+                <div class="tables-grid">
+                    <div class="table-card" data-table="product_category">
+                        <div class="table-header product"><span class="table-name">📋 product_category</span><span class="row-count">~20条</span></div>
+                        <div class="table-columns">
+                            <div class="column-row" data-col="category_id" data-pk="true"><span class="col-name pk">category_id</span><span class="col-type">SERIAL</span></div>
+                            <div class="column-row"><span class="col-name">category_name</span><span class="col-type">VARCHAR(100)</span></div>
+                            <div class="column-row" data-col="parent_id" data-fk="product_category.category_id"><span class="col-name fk">parent_id → self</span><span class="col-type">INT</span></div>
+                        </div>
+                        <div class="table-footer">品类表(自引用)</div>
+                    </div>
+                    <div class="table-card" data-table="product">
+                        <div class="table-header product"><span class="table-name">📋 product</span><span class="row-count">551条</span></div>
+                        <div class="table-columns">
+                            <div class="column-row" data-col="product_id" data-pk="true"><span class="col-name pk">product_id</span><span class="col-type">SERIAL</span></div>
+                            <div class="column-row"><span class="col-name">product_name</span><span class="col-type">VARCHAR(100)</span></div>
+                            <div class="column-row"><span class="col-name">product_type</span><span class="col-type">成品/半成品/原材料</span></div>
+                            <div class="column-row" data-col="category_id" data-fk="product_category.category_id"><span class="col-name fk">category_id → category</span><span class="col-type">INT</span></div>
+                            <div class="column-row"><span class="col-name">current_cost</span><span class="col-type">BYTEA 🔐</span></div>
+                        </div>
+                        <div class="table-footer">产品表</div>
+                    </div>
+                    <div class="table-card" data-table="recipe">
+                        <div class="table-header product"><span class="table-name">📋 recipe</span><span class="row-count">87条</span></div>
+                        <div class="table-columns">
+                            <div class="column-row" data-col="recipe_id" data-pk="true"><span class="col-name pk">recipe_id</span><span class="col-type">SERIAL</span></div>
+                            <div class="column-row" data-col="product_id" data-fk="product.product_id"><span class="col-name fk">product_id → product</span><span class="col-type">INT</span></div>
+                            <div class="column-row"><span class="col-name">version</span><span class="col-type">INT</span></div>
+                            <div class="column-row"><span class="col-name">is_current</span><span class="col-type">BOOLEAN</span></div>
+                        </div>
+                        <div class="table-footer">配方表</div>
+                    </div>
+                    <div class="table-card" data-table="recipe_item">
+                        <div class="table-header product"><span class="table-name">📋 recipe_item</span><span class="row-count">~500条</span></div>
+                        <div class="table-columns">
+                            <div class="column-row" data-col="recipe_item_id" data-pk="true"><span class="col-name pk">recipe_item_id</span><span class="col-type">SERIAL</span></div>
+                            <div class="column-row" data-col="recipe_id" data-fk="recipe.recipe_id"><span class="col-name fk">recipe_id → recipe</span><span class="col-type">INT</span></div>
+                            <div class="column-row" data-col="ingredient_id" data-fk="product.product_id"><span class="col-name fk">ingredient_id → product</span><span class="col-type">INT</span></div>
+                            <div class="column-row"><span class="col-name">quantity</span><span class="col-type">DECIMAL</span></div>
+                        </div>
+                        <div class="table-footer">配方明细(BOM)</div>
+                    </div>
+                </div>
+                <div class="tables-canvas" data-canvas="product"></div>
+                <div class="relationship-note"><strong>BOM分解:</strong> product → recipe → recipe_item → product (递归)</div>
+            </div>
+
+            <!-- Domain 3: Inventory -->
+            <div class="domain-section" data-domain="inventory">
+                <div class="domain-header">
+                    <div class="domain-icon inventory">📦</div>
+                    <div>
+                        <div class="domain-title">库存管理域 (Inventory Domain)</div>
+                        <div class="domain-desc">supplier → purchase_order → warehouse → inventory</div>
+                    </div>
+                </div>
+                <div class="tables-grid">
+                    <div class="table-card" data-table="supplier">
+                        <div class="table-header inventory"><span class="table-name">📋 supplier</span><span class="row-count">~20条</span></div>
+                        <div class="table-columns">
+                            <div class="column-row" data-col="supplier_id" data-pk="true"><span class="col-name pk">supplier_id</span><span class="col-type">SERIAL</span></div>
+                            <div class="column-row"><span class="col-name">supplier_name</span><span class="col-type">VARCHAR(100)</span></div>
+                            <div class="column-row"><span class="col-name">supplier_type</span><span class="col-type">VARCHAR(50)</span></div>
+                        </div>
+                        <div class="table-footer">供应商表</div>
+                    </div>
+                    <div class="table-card" data-table="warehouse">
+                        <div class="table-header inventory"><span class="table-name">📋 warehouse</span><span class="row-count">~10条</span></div>
+                        <div class="table-columns">
+                            <div class="column-row" data-col="warehouse_id" data-pk="true"><span class="col-name pk">warehouse_id</span><span class="col-type">SERIAL</span></div>
+                            <div class="column-row"><span class="col-name">warehouse_name</span><span class="col-type">VARCHAR(100)</span></div>
+                            <div class="column-row" data-col="store_id" data-fk="store.store_id"><span class="col-name fk">store_id → store</span><span class="col-type">INT</span></div>
+                        </div>
+                        <div class="table-footer">仓库表</div>
+                    </div>
+                    <div class="table-card" data-table="inventory">
+                        <div class="table-header inventory"><span class="table-name">📋 inventory</span><span class="row-count">~200条</span></div>
+                        <div class="table-columns">
+                            <div class="column-row" data-col="inventory_id" data-pk="true"><span class="col-name pk">inventory_id</span><span class="col-type">SERIAL</span></div>
+                            <div class="column-row" data-col="warehouse_id" data-fk="warehouse.warehouse_id"><span class="col-name fk">warehouse_id → warehouse</span><span class="col-type">INT</span></div>
+                            <div class="column-row" data-col="product_id" data-fk="product.product_id"><span class="col-name fk">product_id → product</span><span class="col-type">INT</span></div>
+                            <div class="column-row"><span class="col-name">current_quantity</span><span class="col-type">DECIMAL</span></div>
+                        </div>
+                        <div class="table-footer">库存表</div>
+                    </div>
+                    <div class="table-card" data-table="purchase_order">
+                        <div class="table-header inventory"><span class="table-name">📋 purchase_order</span><span class="row-count">~100条</span></div>
+                        <div class="table-columns">
+                            <div class="column-row" data-col="po_id" data-pk="true"><span class="col-name pk">po_id</span><span class="col-type">SERIAL</span></div>
+                            <div class="column-row" data-col="supplier_id" data-fk="supplier.supplier_id"><span class="col-name fk">supplier_id → supplier</span><span class="col-type">INT</span></div>
+                            <div class="column-row" data-col="warehouse_id" data-fk="warehouse.warehouse_id"><span class="col-name fk">warehouse_id → warehouse</span><span class="col-type">INT</span></div>
+                            <div class="column-row"><span class="col-name">order_date</span><span class="col-type">DATE</span></div>
+                        </div>
+                        <div class="table-footer">采购订单表</div>
+                    </div>
+                </div>
+                <div class="tables-canvas" data-canvas="inventory"></div>
+            </div>
+
+            <!-- Domain 4: Sales -->
+            <div class="domain-section" data-domain="sales">
+                <div class="domain-header">
+                    <div class="domain-icon sales">💰</div>
+                    <div>
+                        <div class="domain-title">销售分析域 (Sales & Analytics Domain)</div>
+                        <div class="domain-desc">sales_order → sales_order_item → 成本分析</div>
+                    </div>
+                </div>
+                <div class="tables-grid">
+                    <div class="table-card" data-table="sales_order">
+                        <div class="table-header sales"><span class="table-name">📋 sales_order</span><span class="row-count">~5000条</span></div>
+                        <div class="table-columns">
+                            <div class="column-row" data-col="order_id" data-pk="true"><span class="col-name pk">order_id</span><span class="col-type">SERIAL</span></div>
+                            <div class="column-row"><span class="col-name">order_code</span><span class="col-type">VARCHAR(30)</span></div>
+                            <div class="column-row" data-col="store_id" data-fk="store.store_id"><span class="col-name fk">store_id → store</span><span class="col-type">INT</span></div>
+                            <div class="column-row"><span class="col-name">order_date</span><span class="col-type">TIMESTAMP</span></div>
+                            <div class="column-row"><span class="col-name">final_amount</span><span class="col-type">DECIMAL</span></div>
+                        </div>
+                        <div class="table-footer">订单主表</div>
+                    </div>
+                    <div class="table-card" data-table="sales_order_item">
+                        <div class="table-header sales"><span class="table-name">📋 sales_order_item</span><span class="row-count">~15000条</span></div>
+                        <div class="table-columns">
+                            <div class="column-row" data-col="item_id" data-pk="true"><span class="col-name pk">item_id</span><span class="col-type">SERIAL</span></div>
+                            <div class="column-row" data-col="order_id" data-fk="sales_order.order_id"><span class="col-name fk">order_id → sales_order</span><span class="col-type">INT</span></div>
+                            <div class="column-row" data-col="product_id" data-fk="product.product_id"><span class="col-name fk">product_id → product</span><span class="col-type">INT</span></div>
+                            <div class="column-row"><span class="col-name">quantity</span><span class="col-type">INT</span></div>
+                            <div class="column-row"><span class="col-name">actual_cost_rate</span><span class="col-type">DECIMAL</span></div>
+                        </div>
+                        <div class="table-footer">订单明细</div>
+                    </div>
+                    <div class="table-card" data-table="sales_detail">
+                        <div class="table-header sales"><span class="table-name">📋 sales_detail</span><span class="row-count">567条</span></div>
+                        <div class="table-columns">
+                            <div class="column-row" data-col="detail_id" data-pk="true"><span class="col-name pk">detail_id</span><span class="col-type">SERIAL</span></div>
+                            <div class="column-row" data-col="store_id" data-fk="store.store_id"><span class="col-name fk">store_id → store</span><span class="col-type">INT</span></div>
+                            <div class="column-row" data-col="product_id" data-fk="product.product_id"><span class="col-name fk">product_id → product</span><span class="col-type">INT</span></div>
+                            <div class="column-row"><span class="col-name">sales_date</span><span class="col-type">DATE</span></div>
+                            <div class="column-row"><span class="col-name">actual_cost_rate</span><span class="col-type">实际成本率</span></div>
+                        </div>
+                        <div class="table-footer">销售明细</div>
+                    </div>
+                </div>
+                <div class="tables-canvas" data-canvas="sales"></div>
+                <div class="relationship-note"><strong>公式:</strong> 实际成本率 = 理论成本 / 折后收入 × 100%</div>
+            </div>
+
+            <!-- Domain 5: Platform -->
+            <div class="domain-section" data-domain="platform">
+                <div class="domain-header">
+                    <div class="domain-icon platform">📱</div>
+                    <div>
+                        <div class="domain-title">平台数据域 (Platform Data Domain)</div>
+                        <div class="domain-desc">online_platform → platform_daily_metrics</div>
+                    </div>
+                </div>
+                <div class="tables-grid">
+                    <div class="table-card" data-table="online_platform">
+                        <div class="table-header platform"><span class="table-name">📋 online_platform</span><span class="row-count">5条</span></div>
+                        <div class="table-columns">
+                            <div class="column-row" data-col="platform_id" data-pk="true"><span class="col-name pk">platform_id</span><span class="col-type">SERIAL</span></div>
+                            <div class="column-row"><span class="col-name">platform_name</span><span class="col-type">VARCHAR(50)</span></div>
+                            <div class="column-row"><span class="col-name">platform_type</span><span class="col-type">外卖/点评/团购</span></div>
+                        </div>
+                        <div class="table-footer">平台表</div>
+                    </div>
+                    <div class="table-card" data-table="store_platform_account">
+                        <div class="table-header platform"><span class="table-name">📋 store_platform_account</span><span class="row-count">~20条</span></div>
+                        <div class="table-columns">
+                            <div class="column-row" data-col="account_id" data-pk="true"><span class="col-name pk">account_id</span><span class="col-type">SERIAL</span></div>
+                            <div class="column-row" data-col="store_id" data-fk="store.store_id"><span class="col-name fk">store_id → store</span><span class="col-type">INT</span></div>
+                            <div class="column-row" data-col="platform_id" data-fk="online_platform.platform_id"><span class="col-name fk">platform_id → platform</span><span class="col-type">INT</span></div>
+                        </div>
+                        <div class="table-footer">门店平台账号</div>
+                    </div>
+                    <div class="table-card" data-table="platform_daily_metrics">
+                        <div class="table-header platform"><span class="table-name">📋 platform_daily_metrics</span><span class="row-count">2566条</span></div>
+                        <div class="table-columns">
+                            <div class="column-row" data-col="metric_id" data-pk="true"><span class="col-name pk">metric_id</span><span class="col-type">SERIAL</span></div>
+                            <div class="column-row" data-col="store_id" data-fk="store.store_id"><span class="col-name fk">store_id → store</span><span class="col-type">INT</span></div>
+                            <div class="column-row" data-col="platform_id" data-fk="online_platform.platform_id"><span class="col-name fk">platform_id → platform</span><span class="col-type">INT</span></div>
+                            <div class="column-row"><span class="col-name">exposure_count</span><span class="col-type">曝光量</span></div>
+                        </div>
+                        <div class="table-footer">平台日运营数据</div>
+                    </div>
+                </div>
+                <div class="tables-canvas" data-canvas="platform"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentView = 'panel';
+        const canvasArea = document.getElementById('canvas-area');
+        const globalSvg = document.getElementById('global-svg');
+
+        // View toggle
+        document.querySelectorAll('.view-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const view = btn.dataset.view;
+                if (view === currentView) return;
+                currentView = view;
+                document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+
+                if (view === 'canvas') {
+                    document.querySelectorAll('.domain-section').forEach(s => s.classList.add('canvas-view-active'));
+                    globalSvg.style.display = 'block';
+                    initCanvasView();
+                } else {
+                    document.querySelectorAll('.domain-section').forEach(s => s.classList.remove('canvas-view-active'));
+                    globalSvg.style.display = 'none';
+                    globalSvg.innerHTML = globalSvg.querySelector('defs').outerHTML;
+                }
+            });
+        });
+
+        function initCanvasView() {
+            // Clone tables to canvas containers
+            document.querySelectorAll('.domain-section').forEach(section => {
+                const grid = section.querySelector('.tables-grid');
+                const canvas = section.querySelector('.tables-canvas');
+                canvas.innerHTML = '';
+
+                grid.querySelectorAll('.table-card').forEach(card => {
+                    const clone = card.cloneNode(true);
+                    canvas.appendChild(clone);
+                    makeDraggable(clone);
+                });
+            });
+
+            // Update SVG size and draw lines
+            setTimeout(() => {
+                updateSvgSize();
+                drawAllRelationships();
+            }, 100);
+
+            // Redraw on scroll
+            canvasArea.addEventListener('scroll', drawAllRelationships);
+        }
+
+        function updateSvgSize() {
+            const rect = canvasArea.getBoundingClientRect();
+            globalSvg.style.width = canvasArea.scrollWidth + 'px';
+            globalSvg.style.height = canvasArea.scrollHeight + 'px';
+        }
+
+        function makeDraggable(element) {
+            let isDragging = false;
+            let startX, startY, origX, origY;
+
+            element.addEventListener('mousedown', (e) => {
+                if (e.target.closest('.table-columns')) return;
+                isDragging = true;
+                element.classList.add('dragging');
+                const rect = element.getBoundingClientRect();
+                const parentRect = element.parentElement.getBoundingClientRect();
+                startX = e.clientX;
+                startY = e.clientY;
+                origX = rect.left - parentRect.left;
+                origY = rect.top - parentRect.top;
+                element.style.position = 'relative';
+                e.preventDefault();
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (!isDragging) return;
+                const dx = e.clientX - startX;
+                const dy = e.clientY - startY;
+                element.style.left = dx + 'px';
+                element.style.top = dy + 'px';
+                drawAllRelationships();
+            });
+
+            document.addEventListener('mouseup', () => {
+                if (isDragging) {
+                    isDragging = false;
+                    element.classList.remove('dragging');
+                }
+            });
+        }
+
+        function drawAllRelationships() {
+            // Clear existing lines (keep defs)
+            const defs = globalSvg.querySelector('defs');
+            globalSvg.innerHTML = '';
+            globalSvg.appendChild(defs);
+
+            updateSvgSize();
+
+            // Find all FK columns and draw lines to their PK targets
+            const allTables = document.querySelectorAll('.tables-canvas .table-card');
+            const tableMap = {};
+
+            allTables.forEach(table => {
+                tableMap[table.dataset.table] = table;
+            });
+
+            allTables.forEach(table => {
+                const tableName = table.dataset.table;
+                const fkRows = table.querySelectorAll('.column-row[data-fk]');
+
+                fkRows.forEach(fkRow => {
+                    const fkRef = fkRow.dataset.fk;
+                    if (!fkRef) return;
+
+                    const [refTable, refCol] = fkRef.split('.');
+                    const targetTable = tableMap[refTable];
+                    if (!targetTable) return;
+
+                    // Find the PK row in target table
+                    const pkRow = targetTable.querySelector(`.column-row[data-col="${refCol}"][data-pk="true"]`);
+                    if (!pkRow) return;
+
+                    // Check if same domain (for line style)
+                    const fkDomain = table.closest('.domain-section').dataset.domain;
+                    const pkDomain = targetTable.closest('.domain-section').dataset.domain;
+                    const isCrossDomain = fkDomain !== pkDomain;
+
+                    // Get positions relative to canvas-area
+                    const canvasRect = canvasArea.getBoundingClientRect();
+                    const scrollLeft = canvasArea.scrollLeft;
+                    const scrollTop = canvasArea.scrollTop;
+
+                    // Get table card boundaries (for line start/end at card edges)
+                    const fkTableRect = table.getBoundingClientRect();
+                    const pkTableRect = targetTable.getBoundingClientRect();
+
+                    // Get row positions (for Y alignment)
+                    const fkRowRect = fkRow.getBoundingClientRect();
+                    const pkRowRect = pkRow.getBoundingClientRect();
+
+                    // Y positions aligned with specific rows
+                    const y1 = fkRowRect.top + fkRowRect.height / 2 - canvasRect.top + scrollTop;
+                    const y2 = pkRowRect.top + pkRowRect.height / 2 - canvasRect.top + scrollTop;
+
+                    // Determine line direction based on table positions
+                    // Line starts from FK table edge, ends at PK table edge
+                    let startX, endX;
+                    const fkTableCenterX = fkTableRect.left + fkTableRect.width / 2;
+                    const pkTableCenterX = pkTableRect.left + pkTableRect.width / 2;
+
+                    if (fkTableCenterX < pkTableCenterX) {
+                        // FK table is to the left of PK table
+                        startX = fkTableRect.right - canvasRect.left + scrollLeft;
+                        endX = pkTableRect.left - canvasRect.left + scrollLeft;
+                    } else {
+                        // FK table is to the right of PK table
+                        startX = fkTableRect.left - canvasRect.left + scrollLeft;
+                        endX = pkTableRect.right - canvasRect.left + scrollLeft;
+                    }
+
+                    // Create curved path
+                    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+
+                    // Use cubic bezier for smoother curves
+                    const ctrlX1 = startX + (endX - startX) * 0.3;
+                    const ctrlX2 = startX + (endX - startX) * 0.7;
+                    path.setAttribute('d', `M ${startX} ${y1} C ${ctrlX1} ${y1}, ${ctrlX2} ${y2}, ${endX} ${y2}`);
+
+                    path.setAttribute('class', 'relationship-line' + (isCrossDomain ? ' cross-domain' : ''));
+                    path.setAttribute('marker-end', isCrossDomain ? 'url(#arrowhead-cross)' : 'url(#arrowhead)');
+                    globalSvg.appendChild(path);
+                });
+            });
+        }
+    </script>
+</body>
+</html>
